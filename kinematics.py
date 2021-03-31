@@ -44,8 +44,8 @@ class InverseKinematicsModel():
             raise ValueError("unsupported mode")
         self.mode = mode
         # if mode == "ICLR2019",
-        # then use equation (13) for y2 (not for y1),
-        #      and use equation (14) for y1 (not for y2),
+        # then use equation (13) (but for for y2, not for y1),
+        #      and use equation (14) (but for y1, not for y2),
         #      defined in https://arxiv.org/abs/1808.04730 (ICLR2019 conference paper).
         # 
         # see https://github.com/VLL-HD/analyzing_inverse_problems
