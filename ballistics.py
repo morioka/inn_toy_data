@@ -1,6 +1,7 @@
 import os
 import warnings
 import numpy as np
+import random
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -264,12 +265,37 @@ class InverseBallisticsDataset(Dataset):
         return DataLoader(self, batch_size=batch_size, shuffle=True, drop_last=True)
 
 
+def seed_everything(seed=1234):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+
 
 if __name__ == '__main__':
     pass
 
+    import sys
+    import argparse
+
+    parser = argparse.ArgumentParser('toy_ballistic data')
+    parser.add_argument('--suffix',    help='suffix',    type=str, default='train')
+    parser.add_argument('--num',       help='number',    type=int, default=10000)
+    parser.add_argument('--dir',       help='directory', type=str, default=None)
+    parser.add_argument('--skip-plot', help='skip plot', action='store_true')
+    parser.add_argument('--seed',      help='seed',      type=int, default=1234)
+
+    args = parser.parse_args()
+
+    seed_everything()
+
     model = InverseBallisticsModel()
-    train_data = InverseBallisticsDataset(model, 10000, None, suffix='train')
+    train_data = InverseBallisticsDataset(model, args.num, args.dir, suffix=args.suffix)
+
+    if args.skip_plot:
+        sys.exit()
     train_loader = train_data.get_dataloader(1000)
 
     for x,y in train_loader:
