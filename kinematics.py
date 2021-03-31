@@ -1,6 +1,7 @@
 import os
 import warnings
 import numpy as np
+import random
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -10,7 +11,7 @@ from matplotlib import cm
 from matplotlib import pyplot as plt
 
 from sklearn.cluster import MeanShift
-from sklearn.neighbors.kde import KernelDensity
+from sklearn.neighbors import KernelDensity
 from scipy.ndimage.filters import gaussian_filter
 
 
@@ -32,12 +33,16 @@ class InverseKinematicsModel():
     n_observations = 2
     name = 'inverse-kinematics'
 
-    def __init__(self, lens=[0.5, 0.5, 1.0], sigmas=[0.25, 0.5, 0.5, 0.5]):
+    def __init__(self, lens=[0.5, 0.5, 1.0], sigmas=[0.25, 0.5, 0.5, 0.5], mode=None):
         self.name = 'inverse-kinematics'
         self.lens = np.array(lens)
         self.sigmas = np.array(sigmas)
         self.rangex = (-0.35, 2.25)
         self.rangey = (-1.3, 1.3)
+
+        if mode is not None and mode not in ["ICLR2019"]:
+            raise ValueError("unsupported mode")
+        self.mode = mode
 
         cmap = cm.tab20c
         self.colors = [[cmap(4*c_index), cmap(4*c_index+1), cmap(4*c_index+2)] for c_index in range(5)][-1]
@@ -55,8 +60,12 @@ class InverseKinematicsModel():
     def forward_process(self, x):
         start = np.stack([np.zeros((x.shape[0])), x[:, 0]], axis=1)
         _, x1 = self.segment_points(start, self.lens[0], x[:,1])
-        _, x2 = self.segment_points(x1, self.lens[1], x[:,1] + x[:,2])
-        _, y  = self.segment_points(x2, self.lens[2], x[:,1] + x[:,2] + x[:,3])
+        if self.mode is None:
+            _, x2 = self.segment_points(x1, self.lens[1], x[:,1] + x[:,2])
+            _, y  = self.segment_points(x2, self.lens[2], x[:,1] + x[:,2] + x[:,3])
+        elif self.mode == "ICLR2019":
+            _, x2 = self.segment_points(x1, self.lens[1], -x[:,1] + x[:,2])
+            _, y  = self.segment_points(x2, self.lens[2], -x[:,1] - x[:,2] + x[:,3])
         return y
 
     def find_MAP(self, x):
@@ -98,8 +107,12 @@ class InverseKinematicsModel():
         starting_pos[:,1] = x[:, 0]
 
         x0, x1 = self.segment_points(starting_pos, self.lens[0], x[:,1])
-        x1, x2 = self.segment_points(x1, self.lens[1], x[:,1] + x[:,2])
-        x2, y = self.segment_points(x2, self.lens[2], x[:,1] + x[:,2] + x[:,3])
+        if self.mode is None:
+            x1, x2 = self.segment_points(x1, self.lens[1], x[:,1] + x[:,2])
+            x2, y = self.segment_points(x2, self.lens[2], x[:,1] + x[:,2] + x[:,3])
+        elif self.mode == "ICLR2019":
+            x1, x2 = self.segment_points(x1, self.lens[1], - x[:,1] + x[:,2])
+            x2, y = self.segment_points(x2, self.lens[2], - x[:,1] - x[:,2] + x[:,3])
 
         hist, xbins, ybins = np.histogram2d(y[:, 0], y[:, 1], bins=600, range=[self.rangex, self.rangey], density=True)
         hist = gaussian_filter(hist, filter_width)
@@ -127,8 +140,12 @@ class InverseKinematicsModel():
         starting_pos = np.zeros((x.shape[0], 2))
         starting_pos[:,1] = x[:, 0]
         x0, x1 = self.segment_points(starting_pos, self.lens[0], x[:,1])
-        x1, x2 = self.segment_points(x1, self.lens[1], x[:,1] + x[:,2])
-        x2, x3 = self.segment_points(x2, self.lens[2], x[:,1] + x[:,2] + x[:,3])
+        if self.mode is None:
+            x1, x2 = self.segment_points(x1, self.lens[1], x[:,1] + x[:,2])
+            x2, x3 = self.segment_points(x2, self.lens[2], x[:,1] + x[:,2] + x[:,3])
+        elif self.mode == "ICLR2019":
+            x1, x2 = self.segment_points(x1, self.lens[1], - x[:,1] + x[:,2])
+            x2, x3 = self.segment_points(x2, self.lens[2], - x[:,1] - x[:,2] + x[:,3])
 
         plt.axvline(x=0, ls=':', c='gray', linewidth=.5)
         if not arrows:
@@ -232,13 +249,39 @@ class InverseKinematicsDataset(Dataset):
         return DataLoader(self, batch_size=batch_size, shuffle=True, drop_last=True)
 
 
+def seed_everything(seed=1234):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+
 
 if __name__ == '__main__':
     pass
 
-    model = InverseKinematicsModel()
-    train_data = InverseKinematicsDataset(model, 4000, None, suffix='train')
-    train_loader = train_data.get_dataloader(4000)
+    import sys
+    import argparse
+
+    parser = argparse.ArgumentParser('toy_kinematics data')
+    parser.add_argument('--suffix',    help='suffix',    type=str, default='train')
+    parser.add_argument('--num',       help='number',    type=int, default=4000)
+    parser.add_argument('--dir',       help='directory', type=str, default=None)
+    parser.add_argument('--skip-plot', help='skip plot', action='store_true')
+    parser.add_argument('--mode',      help='mode',      type=str, default=None)
+    parser.add_argument('--seed',      help='seed',      type=int, default=1234)
+
+    args = parser.parse_args()
+
+    seed_everything()
+
+    model = InverseKinematicsModel(mode=args.mode)
+    train_data = InverseKinematicsDataset(model, args.num, args.dir, suffix=args.suffix)
+
+    if args.skip_plot:
+        sys.exit()
+    train_loader = train_data.get_dataloader(args.num)
 
     for x,y in train_loader:
         print(x.shape, y.shape)
